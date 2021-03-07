@@ -7,6 +7,9 @@ use signal_hook::{
     consts::signal::{SIGHUP, SIGUSR1},
     iterator::Signals,
 };
+use std::io::stderr;
+use std::sync::mpsc::channel;
+use std::thread::spawn;
 use std::{
     convert::TryInto,
     io::Write,
@@ -41,7 +44,7 @@ enum Event {
 impl DevServer {
     fn determine_bin(&self) -> PathBuf {
         if let Some(ref bin) = self.bin {
-            return bin.canonicalize().unwrap();
+            bin.canonicalize().unwrap()
         } else {
             let metadata = Command::new("cargo")
                 .current_dir(self.cwd.clone().unwrap())
@@ -60,7 +63,7 @@ impl DevServer {
                 .unwrap()
                 .as_str()
                 .unwrap()
-                .split(" ")
+                .split(' ')
                 .next()
                 .unwrap();
 
@@ -96,11 +99,11 @@ impl DevServer {
         let mut child = run.spawn().unwrap();
         let child_id = Arc::new(Mutex::new(child.id()));
 
-        let (tx, rx) = std::sync::mpsc::channel();
+        let (tx, rx) = channel();
 
         {
             let tx = tx.clone();
-            std::thread::spawn(move || {
+            spawn(move || {
                 let mut signals = Signals::new(&[SIGHUP, SIGUSR1]).unwrap();
 
                 loop {
@@ -113,9 +116,8 @@ impl DevServer {
             });
         }
 
-        let tx = tx.clone();
-        std::thread::spawn(move || {
-            let (t, r) = std::sync::mpsc::channel::<DebouncedEvent>();
+        spawn(move || {
+            let (t, r) = channel::<DebouncedEvent>();
             let mut watcher = RecommendedWatcher::new(t, Duration::from_secs(1)).unwrap();
 
             if let Some(watches) = self.watch {
@@ -158,7 +160,7 @@ impl DevServer {
 
         {
             let child_id = child_id.clone();
-            std::thread::spawn(move || loop {
+            spawn(move || loop {
                 child.wait().unwrap();
                 log::info!("shut down, restarting");
                 child = run.spawn().unwrap();
@@ -189,7 +191,7 @@ impl DevServer {
                                 // std::io::stdout().write_all(&ok.stdout).unwrap();
                                 // std::io::stderr().write_all(&ok.stderr).unwrap();
                             } else {
-                                std::io::stderr().write_all(&ok.stderr).unwrap();
+                                stderr().write_all(&ok.stderr).unwrap();
                             }
                         }
                         Err(e) => {
