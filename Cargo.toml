@@ -1,0 +1,18 @@
+[package]
+name = "cargo-devserver"
+version = "0.1.0"
+authors = ["Jacob Rothstein <hi@jbr.me>"]
+edition = "2018"
+description = "recompile harness for rust web app development on cfg(unix)"
+license = "Apache-2.0/MIT"
+
+[dependencies]
+serde = "1.0.123"
+serde_json = "1.0.62"
+structopt = "0.3.21"
+nix = "0.19.1"
+signal-hook = "0.3.4"
+notify = "4.0.15"
+log = "0.4.14"
+env_logger = "0.8.3"
+libc = "0.2.86"
