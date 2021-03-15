@@ -8,6 +8,7 @@ use signal_hook::{
     iterator::Signals,
 };
 use std::io::stderr;
+use std::net::{SocketAddr, ToSocketAddrs};
 use std::sync::mpsc::channel;
 use std::thread::spawn;
 use std::{
@@ -22,15 +23,27 @@ use structopt::StructOpt;
 
 #[derive(StructOpt, Debug)]
 pub struct DevServer {
+    /// Local host or ip to listen on
+    #[structopt(short = "o", long, env, default_value = "localhost")]
+    host: String,
+
+    /// Local port to listen on
+    #[structopt(short, long, env, default_value = "8080")]
+    port: u16,
+
+    /// directories or files to watch in order to trigger a rebuild. directories will be watched recursively
     #[structopt(short, long, env, parse(from_os_str), default_value = "src")]
     watch: Option<Vec<PathBuf>>,
 
+    /// the binary to execute. the default will be whatever cargo would execute
     #[structopt(short, long, env, parse(from_os_str))]
     bin: Option<PathBuf>,
 
+    /// the working directory to execute cargo in. defaults to the current working directory
     #[structopt(short, long)]
     cwd: Option<PathBuf>,
 
+    /// use cargo build --release for an optimized production release
     #[structopt(short, long)]
     release: bool,
 }
@@ -75,8 +88,41 @@ impl DevServer {
         }
     }
 
+    fn socket(addr: SocketAddr) -> Option<std::os::unix::io::RawFd> {
+        use nix::sys::socket::*;
+        let address_fam = if addr.is_ipv6() {
+            AddressFamily::Inet6
+        } else {
+            AddressFamily::Inet
+        };
+
+        let fd = socket(
+            address_fam,
+            SockType::Stream,
+            SockFlag::empty(),
+            Some(SockProtocol::Tcp),
+        )
+        .ok()?;
+        setsockopt(fd, sockopt::ReuseAddr, &true).ok()?;
+        bind(fd, &SockAddr::new_inet(InetAddr::from_std(&addr))).ok()?;
+        listen(fd, 0).ok()?;
+
+        log::info!("{}", getsockname(fd).ok()?);
+        Some(fd)
+    }
+
+    fn open_socket(&self) -> std::os::unix::io::RawFd {
+        (&*self.host, self.port)
+            .to_socket_addrs()
+            .unwrap()
+            .find_map(Self::socket)
+            .unwrap()
+    }
+
     pub fn run(mut self) {
         env_logger::init();
+
+        let socket = self.open_socket();
 
         let cwd = self
             .cwd
@@ -86,6 +132,8 @@ impl DevServer {
         let bin = self.determine_bin();
 
         let mut run = Command::new(&bin);
+        run.env("LISTEN_FD", socket.to_string());
+        run.env("CARGO_DEVSERVER", "true");
         run.current_dir(&cwd);
 
         let mut build = Command::new("cargo");
@@ -93,6 +141,7 @@ impl DevServer {
         if self.release {
             args.push("--release");
         }
+        build.env("CARGO_DEVSERVER", "true");
         build.args(&args[..]);
         build.current_dir(&cwd);
 
@@ -187,9 +236,6 @@ impl DevServer {
                         Ok(ok) => {
                             if ok.status.success() {
                                 log::debug!("{}", String::from_utf8_lossy(&ok.stdout[..]));
-
-                                // std::io::stdout().write_all(&ok.stdout).unwrap();
-                                // std::io::stderr().write_all(&ok.stderr).unwrap();
                             } else {
                                 stderr().write_all(&ok.stderr).unwrap();
                             }
@@ -204,6 +250,7 @@ impl DevServer {
     }
 }
 #[derive(StructOpt)]
+#[structopt(bin_name = "cargo")]
 pub enum CliRoot {
     Devserver(DevServer),
 }
