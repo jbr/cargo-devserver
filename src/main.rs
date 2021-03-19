@@ -237,9 +237,6 @@ impl DevServer {
                 Event::Rebuild => {
                     log::info!("building...");
                     let output = build.output();
-                    while let Ok(x) = rx.try_recv() {
-                        log::debug!("discarding {:?}", x);
-                    }
                     match output {
                         Ok(ok) => {
                             if ok.status.success() {
