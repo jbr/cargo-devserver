@@ -2,7 +2,7 @@ use nix::{
     sys::signal::{self, Signal},
     unistd::Pid,
 };
-use notify::{DebouncedEvent, RecommendedWatcher, RecursiveMode, Watcher};
+use notify::{RawEvent, RecommendedWatcher, RecursiveMode, Watcher};
 use signal_hook::{
     consts::signal::{SIGHUP, SIGUSR1},
     iterator::Signals,
@@ -17,7 +17,6 @@ use std::{
     path::PathBuf,
     process::Command,
     sync::{Arc, Mutex},
-    time::Duration,
 };
 use structopt::StructOpt;
 
@@ -46,6 +45,12 @@ pub struct DevServer {
     /// use cargo build --release for an optimized production release
     #[structopt(short, long)]
     release: bool,
+
+    #[structopt(short, long)]
+    example: Option<String>,
+
+    #[structopt(short, long, default_value = "SIGTERM")]
+    signal: Signal,
 }
 
 #[derive(Debug)]
@@ -80,11 +85,14 @@ impl DevServer {
                 .next()
                 .unwrap();
 
-            target_dir
-                .join(if self.release { "release" } else { "debug" })
-                .join(root)
-                .canonicalize()
-                .unwrap()
+            let target_dir = target_dir.join(if self.release { "release" } else { "debug" });
+            let target_dir = if let Some(example) = &self.example {
+                target_dir.join("examples").join(example)
+            } else {
+                target_dir.join(root)
+            };
+
+            target_dir.canonicalize().unwrap()
         }
     }
 
@@ -141,12 +149,20 @@ impl DevServer {
         if self.release {
             args.push("--release");
         }
+        if let Some(example) = &self.example {
+            args.push("--example");
+            args.push(example);
+            self.watch
+                .get_or_insert_with(Vec::new)
+                .push(cwd.join("examples"));
+        }
         build.env("CARGO_DEVSERVER", "true");
         build.args(&args[..]);
         build.current_dir(&cwd);
 
         let mut child = run.spawn().unwrap();
         let child_id = Arc::new(Mutex::new(child.id()));
+        let signal = self.signal;
 
         let (tx, rx) = channel();
 
@@ -166,8 +182,8 @@ impl DevServer {
         }
 
         spawn(move || {
-            let (t, r) = channel::<DebouncedEvent>();
-            let mut watcher = RecommendedWatcher::new(t, Duration::from_secs(1)).unwrap();
+            let (t, r) = channel::<RawEvent>();
+            let mut watcher = RecommendedWatcher::new_raw(t).unwrap();
 
             if let Some(watches) = self.watch {
                 for watch in watches {
@@ -186,22 +202,13 @@ impl DevServer {
             watcher.watch(&bin, RecursiveMode::NonRecursive).unwrap();
 
             while let Ok(m) = r.recv() {
-                let path = match &m {
-                    DebouncedEvent::Create(p) => Some(p),
-                    DebouncedEvent::Write(p) => Some(p),
-                    DebouncedEvent::Chmod(p) => Some(p),
-                    DebouncedEvent::Remove(p) => Some(p),
-                    DebouncedEvent::Rename(_, p) => Some(p),
-                    _ => None,
-                };
-
-                if let Some(path) = path {
-                    let path = path.canonicalize().unwrap();
-
-                    if path == bin {
-                        tx.send(Event::Signal).unwrap();
-                    } else {
-                        tx.send(Event::Rebuild).unwrap();
+                if let Some(path) = m.path {
+                    if let Ok(path) = path.canonicalize() {
+                        if path == bin {
+                            tx.send(Event::Signal).unwrap();
+                        } else {
+                            tx.send(Event::Rebuild).unwrap();
+                        }
                     }
                 }
             }
@@ -220,9 +227,10 @@ impl DevServer {
         loop {
             match rx.recv().unwrap() {
                 Event::Signal => {
+                    log::info!("attempting to send {}", &signal);
                     signal::kill(
                         Pid::from_raw((*child_id.lock().unwrap()).try_into().unwrap()),
-                        Signal::SIGTERM,
+                        signal,
                     )
                     .unwrap();
                 }
