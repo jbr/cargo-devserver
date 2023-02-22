@@ -18,6 +18,8 @@ use std::{
 };
 use structopt::StructOpt;
 
+mod cwd;
+
 #[derive(StructOpt, Debug)]
 pub struct DevServer {
     /// Local host or ip to listen on
@@ -37,8 +39,8 @@ pub struct DevServer {
     bin: Option<PathBuf>,
 
     /// the working directory to execute cargo in. defaults to the current working directory
-    #[structopt(short, long)]
-    cwd: Option<PathBuf>,
+    #[structopt(short, long, default_value, parse(from_os_str))]
+    cwd: cwd::Cwd,
 
     /// use cargo build --release for an optimized production release
     #[structopt(short, long)]
@@ -62,35 +64,48 @@ impl DevServer {
         if let Some(ref bin) = self.bin {
             bin.canonicalize().unwrap()
         } else {
-            let metadata = Command::new("cargo")
-                .current_dir(self.cwd.clone().unwrap())
-                .args(["metadata", "--format-version", "1"])
-                .output()
+            let metadata = cargo_metadata::MetadataCommand::new()
+                .no_deps()
+                .current_dir(&self.cwd)
+                .exec()
                 .unwrap();
 
-            let value: serde_json::Value = serde_json::from_slice(&metadata.stdout).unwrap();
-            let target_dir =
-                PathBuf::from(value.get("target_directory").unwrap().as_str().unwrap());
-
-            let root = value
-                .get("resolve")
-                .unwrap()
-                .get("root")
-                .unwrap()
-                .as_str()
-                .unwrap()
-                .split(' ')
-                .next()
+            let target_dir = metadata
+                .target_directory
+                .join(if self.release { "release" } else { "debug" })
+                .canonicalize()
                 .unwrap();
 
-            let target_dir = target_dir.join(if self.release { "release" } else { "debug" });
-            let target_dir = if let Some(example) = &self.example {
-                target_dir.join("examples").join(example)
-            } else {
-                target_dir.join(root)
+            if let Some(example) = &self.example {
+                return target_dir.join("examples").join(example);
+            }
+
+            let possible_bin_target_names = metadata
+                .packages
+                .iter()
+                .filter_map(|p| match &p.default_run {
+                    Some(x) => Some(x.clone()),
+                    None => {
+                        let bin_targets = p
+                            .targets
+                            .iter()
+                            .filter(|t| t.kind.contains(&String::from("bin")))
+                            .collect::<Vec<_>>();
+
+                        if p.manifest_path.parent().unwrap() == self.cwd && bin_targets.len() == 1 {
+                            Some(bin_targets[0].name.clone())
+                        } else {
+                            None
+                        }
+                    }
+                })
+                .collect::<Vec<_>>();
+
+            let [bin_target_name] = &possible_bin_target_names[..] else {
+                panic!("could not determine bin target {possible_bin_target_names:?}")
             };
 
-            target_dir.canonicalize().unwrap()
+            target_dir.join(bin_target_name)
         }
     }
 
@@ -130,17 +145,12 @@ impl DevServer {
 
         let socket = self.open_socket();
 
-        let cwd = self
-            .cwd
-            .get_or_insert_with(|| std::env::current_dir().unwrap())
-            .clone();
-
         let bin = self.determine_bin();
 
         let mut run = Command::new(&bin);
         run.env("LISTEN_FD", socket.to_string());
         run.env("CARGO_DEVSERVER", "true");
-        run.current_dir(&cwd);
+        run.current_dir(&self.cwd);
 
         let mut build = Command::new("cargo");
         let mut args = vec!["build", "--color=always"];
@@ -152,11 +162,11 @@ impl DevServer {
             args.push(example);
             self.watch
                 .get_or_insert_with(Vec::new)
-                .push(cwd.join("examples"));
+                .push(self.cwd.join("examples"));
         }
         build.env("CARGO_DEVSERVER", "true");
         build.args(&args[..]);
-        build.current_dir(&cwd);
+        build.current_dir(&self.cwd);
 
         let mut child = run.spawn().unwrap();
         let child_id = Arc::new(Mutex::new(child.id()));
@@ -192,12 +202,12 @@ impl DevServer {
             if let Some(watches) = self.watch {
                 for watch in watches {
                     let watch = if watch.is_relative() {
-                        cwd.join(watch)
+                        self.cwd.join(watch)
                     } else {
                         watch
                     };
 
-                    let watch = watch.canonicalize().unwrap();
+                    let watch = watch.canonicalize().unwrap_or(watch);
                     log::info!("watching {:?}", &watch);
                     watcher.watch(&watch, RecursiveMode::Recursive).unwrap();
                 }
