@@ -30,8 +30,8 @@ jobs:
       with:
         command: build
 
-  check_fmt_and_docs:
-    name: Lints and Docs
+  check_fmt_and_udeps:
+    name: Lints and Udeps
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@master
@@ -55,5 +55,3 @@ jobs:
         version: 'latest'
         args: '--all-targets'
 
-    - name: Docs
-      run: cargo doc --no-deps
