@@ -64,7 +64,7 @@ impl DevServer {
         } else {
             let metadata = Command::new("cargo")
                 .current_dir(self.cwd.clone().unwrap())
-                .args(&["metadata", "--format-version", "1"])
+                .args(["metadata", "--format-version", "1"])
                 .output()
                 .unwrap();
 
@@ -167,7 +167,7 @@ impl DevServer {
         {
             let tx = tx.clone();
             spawn(move || {
-                let mut signals = Signals::new(&[SIGHUP, SIGUSR1]).unwrap();
+                let mut signals = Signals::new([SIGHUP, SIGUSR1]).unwrap();
 
                 loop {
                     for signal in signals.pending() {
