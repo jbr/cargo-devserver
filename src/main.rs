@@ -2,21 +2,19 @@ use nix::{
     sys::signal::{self, Signal},
     unistd::Pid,
 };
-use notify::{RawEvent, RecommendedWatcher, RecursiveMode, Watcher};
+use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use signal_hook::{
     consts::signal::{SIGHUP, SIGUSR1},
     iterator::Signals,
 };
-use std::io::stderr;
-use std::net::{SocketAddr, ToSocketAddrs};
-use std::sync::mpsc::channel;
-use std::thread::spawn;
 use std::{
     convert::TryInto,
-    io::Write,
+    io::{stderr, Write},
+    net::{SocketAddr, ToSocketAddrs},
     path::PathBuf,
     process::Command,
-    sync::{Arc, Mutex},
+    sync::{mpsc::channel, Arc, Mutex},
+    thread::spawn,
 };
 use structopt::StructOpt;
 
@@ -112,10 +110,10 @@ impl DevServer {
         )
         .ok()?;
         setsockopt(fd, sockopt::ReuseAddr, &true).ok()?;
-        bind(fd, &SockAddr::new_inet(InetAddr::from_std(&addr))).ok()?;
+        bind(fd, &SockaddrStorage::from(addr)).ok()?;
         listen(fd, 0).ok()?;
 
-        log::info!("{}", getsockname(fd).ok()?);
+        log::info!("{:?}", getsockname(fd).ok()?);
         Some(fd)
     }
 
@@ -182,8 +180,14 @@ impl DevServer {
         }
 
         spawn(move || {
-            let (t, r) = channel::<RawEvent>();
-            let mut watcher = RecommendedWatcher::new_raw(t).unwrap();
+            let (t, r) = channel::<notify::Event>();
+            let mut watcher = RecommendedWatcher::new(
+                move |result: notify::Result<notify::Event>| {
+                    t.send(result.unwrap()).unwrap();
+                },
+                notify::Config::default().with_compare_contents(true),
+            )
+            .unwrap();
 
             if let Some(watches) = self.watch {
                 for watch in watches {
@@ -195,14 +199,14 @@ impl DevServer {
 
                     let watch = watch.canonicalize().unwrap();
                     log::info!("watching {:?}", &watch);
-                    watcher.watch(watch, RecursiveMode::Recursive).unwrap();
+                    watcher.watch(&watch, RecursiveMode::Recursive).unwrap();
                 }
             }
 
             watcher.watch(&bin, RecursiveMode::NonRecursive).unwrap();
 
             while let Ok(m) = r.recv() {
-                if let Some(path) = m.path {
+                for path in m.paths {
                     if let Ok(path) = path.canonicalize() {
                         if path == bin {
                             tx.send(Event::Signal).unwrap();
