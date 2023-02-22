@@ -2,7 +2,7 @@
 name = "cargo-devserver"
 version = "0.1.0"
 authors = ["Jacob Rothstein <hi@jbr.me>"]
-edition = "2018"
+edition = "2021"
 description = "recompile harness for rust web app development on cfg(unix)"
 license = "Apache-2.0/MIT"
 
@@ -16,3 +16,4 @@ notify = "5.1.0"
 log = "0.4.17"
 env_logger = "0.10.0"
 libc = "0.2.139"
+cargo_metadata = "0.15.3"
