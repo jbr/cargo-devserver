@@ -34,6 +34,8 @@ jobs:
     name: Lints and Udeps
     runs-on: ubuntu-latest
     steps:
+    - name: Rust Cache
+      uses: Swatinem/rust-cache@v1.3.0
     - uses: actions/checkout@master
     - uses: actions-rs/toolchain@v1
       with:
