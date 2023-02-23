@@ -1,5 +1,8 @@
 use nix::{
-    sys::signal::{self, Signal},
+    sys::{
+        signal::{self, Signal},
+        socket::{getsockname, SockaddrStorage},
+    },
     unistd::Pid,
 };
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
@@ -129,24 +132,32 @@ impl DevServer {
         bind(fd, &SockaddrStorage::from(addr)).ok()?;
         listen(fd, 0).ok()?;
 
-        log::info!("{:?}", getsockname(fd).ok()?);
         Some(fd)
     }
 
-    fn open_socket(&self) -> std::os::unix::io::RawFd {
+    fn open_socket(&self) -> Option<std::os::unix::io::RawFd> {
         (&*self.host, self.port)
             .to_socket_addrs()
             .unwrap()
             .find_map(Self::socket)
-            .unwrap()
     }
 
     pub fn run(mut self) {
         env_logger::init();
 
-        let socket = self.open_socket();
-
         let bin = self.determine_bin();
+
+        let socket = self
+            .open_socket()
+            .unwrap_or_else(|| panic!("unable to bind to {}:{}", self.host, self.port));
+
+        if let Ok(sockname) = getsockname::<SockaddrStorage>(socket) {
+            log::info!(
+                "bound tcp://{}:{} as tcp://{sockname}",
+                self.host,
+                self.port
+            );
+        }
 
         let mut run = Command::new(&bin);
         run.env("LISTEN_FD", socket.to_string());
@@ -240,9 +251,10 @@ impl DevServer {
             spawn(move || loop {
                 let exit_status = child.wait().unwrap();
                 if shutdown.load(std::sync::atomic::Ordering::SeqCst) {
+                    log::info!("shutting down");
                     exit(exit_status.code().unwrap_or_default());
                 } else {
-                    log::info!("shut down, restarting");
+                    log::info!("child shut down, restarting");
                     child = run.spawn().unwrap();
                     *child_id.lock().unwrap() = child.id();
                 }
