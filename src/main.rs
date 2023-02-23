@@ -4,7 +4,7 @@ use nix::{
 };
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use signal_hook::{
-    consts::signal::{SIGHUP, SIGTERM},
+    consts::signal::{SIGHUP, SIGINT, SIGTERM},
     iterator::Signals,
 };
 use std::{
@@ -12,8 +12,8 @@ use std::{
     io::{stderr, Write},
     net::{SocketAddr, ToSocketAddrs},
     path::PathBuf,
-    process::Command,
-    sync::{mpsc::channel, Arc, Mutex},
+    process::{exit, Command},
+    sync::{atomic::AtomicBool, mpsc::channel, Arc, Mutex},
     thread::spawn,
 };
 use structopt::StructOpt;
@@ -57,6 +57,7 @@ pub struct DevServer {
 enum Event {
     Signal,
     Rebuild,
+    Shutdown,
 }
 
 impl DevServer {
@@ -170,6 +171,7 @@ impl DevServer {
 
         let mut child = run.spawn().unwrap();
         let child_id = Arc::new(Mutex::new(child.id()));
+        let shutdown = Arc::new(AtomicBool::new(false));
         let signal = self.signal;
 
         let (tx, rx) = channel();
@@ -177,12 +179,16 @@ impl DevServer {
         {
             let tx = tx.clone();
             spawn(move || {
-                let mut signals = Signals::new([SIGHUP, SIGTERM]).unwrap();
+                let mut signals = Signals::new([SIGHUP, SIGTERM, SIGINT]).unwrap();
 
                 loop {
                     for signal in signals.forever() {
-                        if let SIGHUP | SIGTERM = signal as libc::c_int {
+                        if let SIGHUP = signal as libc::c_int {
                             tx.send(Event::Signal).unwrap();
+                        }
+
+                        if let SIGTERM | SIGINT = signal as libc::c_int {
+                            tx.send(Event::Shutdown).unwrap();
                         }
                     }
                 }
@@ -230,11 +236,16 @@ impl DevServer {
 
         {
             let child_id = child_id.clone();
+            let shutdown = shutdown.clone();
             spawn(move || loop {
-                child.wait().unwrap();
-                log::info!("shut down, restarting");
-                child = run.spawn().unwrap();
-                *child_id.lock().unwrap() = child.id();
+                let exit_status = child.wait().unwrap();
+                if shutdown.load(std::sync::atomic::Ordering::SeqCst) {
+                    exit(exit_status.code().unwrap_or_default());
+                } else {
+                    log::info!("shut down, restarting");
+                    child = run.spawn().unwrap();
+                    *child_id.lock().unwrap() = child.id();
+                }
             });
         }
 
@@ -264,6 +275,10 @@ impl DevServer {
                             eprintln!("{:?}", e);
                         }
                     }
+                }
+
+                Event::Shutdown => {
+                    shutdown.store(true, std::sync::atomic::Ordering::SeqCst);
                 }
             }
         }
