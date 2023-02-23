@@ -4,7 +4,7 @@ use nix::{
 };
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use signal_hook::{
-    consts::signal::{SIGHUP, SIGUSR1},
+    consts::signal::{SIGHUP, SIGTERM},
     iterator::Signals,
 };
 use std::{
@@ -177,11 +177,11 @@ impl DevServer {
         {
             let tx = tx.clone();
             spawn(move || {
-                let mut signals = Signals::new([SIGHUP, SIGUSR1]).unwrap();
+                let mut signals = Signals::new([SIGHUP, SIGTERM]).unwrap();
 
                 loop {
-                    for signal in signals.pending() {
-                        if let SIGHUP = signal as libc::c_int {
+                    for signal in signals.forever() {
+                        if let SIGHUP | SIGTERM = signal as libc::c_int {
                             tx.send(Event::Signal).unwrap();
                         }
                     }
@@ -248,6 +248,7 @@ impl DevServer {
                     )
                     .unwrap();
                 }
+
                 Event::Rebuild => {
                     log::info!("building...");
                     let output = build.output();
