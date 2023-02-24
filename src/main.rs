@@ -1,10 +1,13 @@
 use nix::{
-    sys::signal::{self, Signal},
+    sys::{
+        signal::{self, Signal},
+        socket::{getsockname, SockaddrStorage},
+    },
     unistd::Pid,
 };
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use signal_hook::{
-    consts::signal::{SIGHUP, SIGUSR1},
+    consts::signal::{SIGHUP, SIGINT, SIGTERM},
     iterator::Signals,
 };
 use std::{
@@ -12,8 +15,8 @@ use std::{
     io::{stderr, Write},
     net::{SocketAddr, ToSocketAddrs},
     path::PathBuf,
-    process::Command,
-    sync::{mpsc::channel, Arc, Mutex},
+    process::{exit, Command},
+    sync::{atomic::AtomicBool, mpsc::channel, Arc, Mutex},
     thread::spawn,
 };
 use structopt::StructOpt;
@@ -57,6 +60,7 @@ pub struct DevServer {
 enum Event {
     Signal,
     Rebuild,
+    Shutdown,
 }
 
 impl DevServer {
@@ -128,24 +132,32 @@ impl DevServer {
         bind(fd, &SockaddrStorage::from(addr)).ok()?;
         listen(fd, 0).ok()?;
 
-        log::info!("{:?}", getsockname(fd).ok()?);
         Some(fd)
     }
 
-    fn open_socket(&self) -> std::os::unix::io::RawFd {
+    fn open_socket(&self) -> Option<std::os::unix::io::RawFd> {
         (&*self.host, self.port)
             .to_socket_addrs()
             .unwrap()
             .find_map(Self::socket)
-            .unwrap()
     }
 
     pub fn run(mut self) {
         env_logger::init();
 
-        let socket = self.open_socket();
-
         let bin = self.determine_bin();
+
+        let socket = self
+            .open_socket()
+            .unwrap_or_else(|| panic!("unable to bind to {}:{}", self.host, self.port));
+
+        if let Ok(sockname) = getsockname::<SockaddrStorage>(socket) {
+            log::info!(
+                "bound tcp://{}:{} as tcp://{sockname}",
+                self.host,
+                self.port
+            );
+        }
 
         let mut run = Command::new(&bin);
         run.env("LISTEN_FD", socket.to_string());
@@ -170,6 +182,7 @@ impl DevServer {
 
         let mut child = run.spawn().unwrap();
         let child_id = Arc::new(Mutex::new(child.id()));
+        let shutdown = Arc::new(AtomicBool::new(false));
         let signal = self.signal;
 
         let (tx, rx) = channel();
@@ -177,12 +190,16 @@ impl DevServer {
         {
             let tx = tx.clone();
             spawn(move || {
-                let mut signals = Signals::new([SIGHUP, SIGUSR1]).unwrap();
+                let mut signals = Signals::new([SIGHUP, SIGTERM, SIGINT]).unwrap();
 
                 loop {
-                    for signal in signals.pending() {
+                    for signal in signals.forever() {
                         if let SIGHUP = signal as libc::c_int {
                             tx.send(Event::Signal).unwrap();
+                        }
+
+                        if let SIGTERM | SIGINT = signal as libc::c_int {
+                            tx.send(Event::Shutdown).unwrap();
                         }
                     }
                 }
@@ -230,11 +247,17 @@ impl DevServer {
 
         {
             let child_id = child_id.clone();
+            let shutdown = shutdown.clone();
             spawn(move || loop {
-                child.wait().unwrap();
-                log::info!("shut down, restarting");
-                child = run.spawn().unwrap();
-                *child_id.lock().unwrap() = child.id();
+                let exit_status = child.wait().unwrap();
+                if shutdown.load(std::sync::atomic::Ordering::SeqCst) {
+                    log::info!("shutting down");
+                    exit(exit_status.code().unwrap_or_default());
+                } else {
+                    log::info!("child shut down, restarting");
+                    child = run.spawn().unwrap();
+                    *child_id.lock().unwrap() = child.id();
+                }
             });
         }
 
@@ -248,6 +271,7 @@ impl DevServer {
                     )
                     .unwrap();
                 }
+
                 Event::Rebuild => {
                     log::info!("building...");
                     let output = build.output();
@@ -263,6 +287,10 @@ impl DevServer {
                             eprintln!("{:?}", e);
                         }
                     }
+                }
+
+                Event::Shutdown => {
+                    shutdown.store(true, std::sync::atomic::Ordering::SeqCst);
                 }
             }
         }
