@@ -1,6 +1,6 @@
 [package]
 name = "cargo-devserver"
-version = "0.2.0"
+version = "0.2.1"
 authors = ["Jacob Rothstein <hi@jbr.me>"]
 edition = "2021"
 description = "recompile harness for rust web app development on cfg(unix)"
