@@ -7,7 +7,7 @@ description = "recompile harness for rust web app development on cfg(unix)"
 license = "Apache-2.0/MIT"
 
 [dependencies]
-serde = "1.0.164"
+serde = "1.0.166"
 serde_json = "1.0.96"
 structopt = "0.3.26"
 nix = "0.26.2"
