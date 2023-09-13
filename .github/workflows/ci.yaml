@@ -23,7 +23,7 @@ jobs:
         override: true
 
     - name: Rust Cache
-      uses: Swatinem/rust-cache@v2.6.1
+      uses: Swatinem/rust-cache@v2.7.0
 
     - name: Run build
       uses: actions-rs/cargo@v1
@@ -35,7 +35,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Rust Cache
-      uses: Swatinem/rust-cache@v2.6.1
+      uses: Swatinem/rust-cache@v2.7.0
     - uses: actions/checkout@master
     - uses: actions-rs/toolchain@v1
       with:
