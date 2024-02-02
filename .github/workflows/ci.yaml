@@ -43,10 +43,10 @@ jobs:
         components: rustfmt, clippy
         override: true
 
-    - uses: actions-rs/clippy-check@v1
+    - uses: giraffate/clippy-action@v1
       with:
-        token: ${{ secrets.GITHUB_TOKEN }}
-        args: --all-features
+        reporter: 'github-pr-review'
+        github_token: ${{ secrets.GITHUB_TOKEN }}
         
     - name: Format
       run: cargo fmt --all -- --check
