@@ -1,3 +1,4 @@
+use clap::Parser;
 use nix::{
     sys::{
         signal::{self, Signal},
@@ -19,40 +20,39 @@ use std::{
     sync::{atomic::AtomicBool, mpsc::channel, Arc, Mutex},
     thread::spawn,
 };
-use structopt::StructOpt;
-
 mod cwd;
 
-#[derive(StructOpt, Debug)]
+#[derive(clap::Args, Debug)]
+#[command(author, version, about, long_about = None)]
 pub struct DevServer {
     /// Local host or ip to listen on
-    #[structopt(short = "o", long, env, default_value = "localhost")]
+    #[arg(short = 'o', long, env, default_value = "localhost")]
     host: String,
 
     /// Local port to listen on
-    #[structopt(short, long, env, default_value = "8080")]
+    #[arg(short, long, env, default_value = "8080")]
     port: u16,
 
     /// directories or files to watch in order to trigger a rebuild. directories will be watched recursively
-    #[structopt(short, long, env, parse(from_os_str), default_value = "src")]
+    #[arg(short, long, env, default_value = "src")]
     watch: Option<Vec<PathBuf>>,
 
     /// the binary to execute. the default will be whatever cargo would execute
-    #[structopt(short, long, env, parse(from_os_str))]
+    #[arg(short, long, env)]
     bin: Option<PathBuf>,
 
     /// the working directory to execute cargo in. defaults to the current working directory
-    #[structopt(short, long, default_value, parse(from_os_str))]
+    #[arg(short, long, default_value_t)]
     cwd: cwd::Cwd,
 
     /// use cargo build --release for an optimized production release
-    #[structopt(short, long)]
+    #[arg(short, long, default_value_t)]
     release: bool,
 
-    #[structopt(short, long)]
+    #[arg(short, long)]
     example: Option<String>,
 
-    #[structopt(short, long, default_value = "SIGTERM")]
+    #[arg(short, long, default_value = "SIGTERM")]
     signal: Signal,
 }
 
@@ -296,20 +296,14 @@ impl DevServer {
         }
     }
 }
-#[derive(StructOpt)]
-#[structopt(bin_name = "cargo")]
+#[derive(clap::Parser, Debug)]
+#[command(name = "cargo")]
+#[command(bin_name = "cargo")]
 pub enum CliRoot {
     Devserver(DevServer),
 }
 
-impl CliRoot {
-    pub fn run(self) {
-        match self {
-            CliRoot::Devserver(s) => s.run(),
-        }
-    }
-}
-
 fn main() {
-    CliRoot::from_args().run();
+    let CliRoot::Devserver(s) = CliRoot::parse();
+    s.run();
 }
