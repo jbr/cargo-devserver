@@ -2,7 +2,7 @@ use clap::Parser;
 use nix::{
     sys::{
         signal::{self, Signal},
-        socket::{getsockname, SockaddrStorage},
+        socket::SockaddrStorage,
     },
     unistd::Pid,
 };
@@ -15,6 +15,7 @@ use std::{
     convert::TryInto,
     io::{stderr, Write},
     net::{SocketAddr, ToSocketAddrs},
+    os::fd::AsRawFd,
     path::PathBuf,
     process::{exit, Command},
     sync::{atomic::AtomicBool, mpsc::channel, Arc, Mutex},
@@ -128,11 +129,11 @@ impl DevServer {
             Some(SockProtocol::Tcp),
         )
         .ok()?;
-        setsockopt(fd, sockopt::ReuseAddr, &true).ok()?;
-        bind(fd, &SockaddrStorage::from(addr)).ok()?;
-        listen(fd, 0).ok()?;
+        setsockopt(&fd, sockopt::ReuseAddr, &true).ok()?;
+        bind(fd.as_raw_fd(), &SockaddrStorage::from(addr)).ok()?;
+        listen(&fd, 0).ok()?;
 
-        Some(fd)
+        Some(fd.as_raw_fd())
     }
 
     fn open_socket(&self) -> Option<std::os::unix::io::RawFd> {
@@ -151,7 +152,7 @@ impl DevServer {
             .open_socket()
             .unwrap_or_else(|| panic!("unable to bind to {}:{}", self.host, self.port));
 
-        if let Ok(sockname) = getsockname::<SockaddrStorage>(socket) {
+        if let Ok(sockname) = nix::sys::socket::getsockname::<SockaddrStorage>(socket) {
             log::info!(
                 "bound tcp://{}:{} as tcp://{sockname}",
                 self.host,
