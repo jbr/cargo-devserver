@@ -6,6 +6,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.3](https://github.com/jbr/cargo-devserver/compare/v0.2.2...v0.2.3) - 2024-06-11
+
+### Other
+- *(deps)* bump clap from 4.5.6 to 4.5.7
+- *(deps)* bump clap from 4.5.3 to 4.5.6
+- *(deps)* bump clap from 4.5.2 to 4.5.3
+- *(deps)* bump serde from 1.0.196 to 1.0.197
+- *(deps)* bump serde_json from 1.0.113 to 1.0.114
+- *(deps)* bump env_logger from 0.11.2 to 0.11.3
+- *(deps)* bump clap from 4.4.18 to 4.5.2
+- *(deps)* bump mio from 0.8.6 to 0.8.11
+- *(deps)* bump log from 0.4.20 to 0.4.21
+- *(deps)* bump env_logger from 0.11.1 to 0.11.2
+
 ## [0.2.2](https://github.com/jbr/cargo-devserver/compare/v0.2.1...v0.2.2) - 2024-02-02
 
 ### Other
