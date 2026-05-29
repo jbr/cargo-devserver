@@ -6,6 +6,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- `SIGINT`/`SIGTERM` sent to the devserver now actually terminate the child
+  instead of leaving it running.
+
+### Added
+- `--fast`: optimize the rebuild loop for compile speed (no debuginfo, max
+  codegen-units, incremental, and the cranelift backend when available).
+- `--debounce-ms`: coalesce bursts of filesystem events into a single rebuild
+  (default 100ms), so one editor save no longer triggers several builds.
+
+### Changed
+- Updated to the 2024 edition (MSRV 1.85).
+- Replaced panics/`unwrap()`s on misconfiguration with clear error messages.
+- Upgraded dependencies: nix 0.27→0.31, cargo_metadata 0.18→0.23,
+  signal-hook 0.3→0.4, notify 6→8, clap, env_logger, log.
+- Dropped unused dependencies: serde, serde_json, libc.
+
 ## [0.2.2](https://github.com/jbr/cargo-devserver/compare/v0.2.1...v0.2.2) - 2024-02-02
 
 ### Other
